@@ -74,7 +74,7 @@ def upload_map(worlds_path: str, cache_dir: str, map_name: str) -> Tuple[bool, s
              bool(source_files["wld"]), bool(source_files["bak"]), bool(source_files["bak2"]))
 
     # 生成日期前缀
-    today = datetime.now().strftime("%Y%m%d")
+    today = datetime.now().strftime("%Y%m%d%H%M%S")
     log.info("步骤2: 复制文件，日期前缀: %s", today)
 
     # 后缀映射: dict key -> 实际文件后缀

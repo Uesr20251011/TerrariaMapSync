@@ -23,10 +23,11 @@ class RemotePanel(QGroupBox):
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
 
-        # 树形控件
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["地图 / 版本", "操作"])
-        self.tree.setColumnWidth(0, 280)
+        self.tree.setHeaderLabels(["地图 / 版本", "时间", "操作"])
+        self.tree.setColumnWidth(0, 240)
+        self.tree.setColumnWidth(1, 100)
+        self.tree.setColumnWidth(2, 120)
         self.tree.setAlternatingRowColors(True)
         self.tree.setRootIsDecorated(True)
         main_layout.addWidget(self.tree)
@@ -66,26 +67,30 @@ class RemotePanel(QGroupBox):
 
         for map_name, versions in remote_maps.items():
             # 一级节点：地图名
-            map_item = QTreeWidgetItem(self.tree, [map_name, ""])
+            map_item = QTreeWidgetItem(self.tree, [map_name, "", ""])
             map_item.setExpanded(True)
 
             for i, ver in enumerate(versions):
-                # 显示完整文件名（含日期前缀）
-                label = ver["wld"]
-                if i == 0:
-                    label += "  (最新)"
+                # 去掉日期前缀取原名
+                original_name = Path(ver["wld"]).name[len(ver["date"]):]
+                # 格式化时间: 20260802173025 → 2026年08月02日 17:30:25
+                d = ver["date"]
+                if len(d) == 14:
+                    date_display = f"{d[0:4]}年{d[4:6]}月{d[6:8]}日 {d[8:10]}:{d[10:12]}:{d[12:14]}"
+                elif len(d) == 8:
+                    date_display = f"{d[0:4]}年{d[4:6]}月{d[6:8]}日"
+                else:
+                    date_display = d
+                # 操作栏文字
+                op_text = "⬇ 下载(最新)" if i == 0 else "⬇ 下载"
 
-                # 二级节点：版本日期
-                ver_item = QTreeWidgetItem(map_item, [label, "⬇ 下载"])
-                ver_item.setData(0, 1, ver["wld"])  # 存储 dated_wld（带日期前缀的完整文件名）
-                # original_name = 去掉日期前缀的文件名
-                original_name = Path(ver["wld"]).name[len(ver["date"]):]  # 去掉前8位日期
-                ver_item.setData(0, 2, original_name)  # 存储原始文件名
+                ver_item = QTreeWidgetItem(map_item, [original_name, date_display, op_text])
+                ver_item.setData(0, 1, ver["wld"])   # 存储完整文件名
+                ver_item.setData(0, 2, original_name)  # 存储原名
 
-                # 最新版本加粗
                 if i == 0:
                     ver_item.setFont(0, bold_font)
-                    ver_item.setText(1, "⬇ 下载(最新)")
+                    ver_item.setFont(1, bold_font)
 
         self.download_btn.setEnabled(True)
 

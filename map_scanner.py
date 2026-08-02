@@ -5,8 +5,8 @@ import re
 from pathlib import Path
 from typing import Optional
 
-# 匹配 YYYYMMDD+原名 格式: "20260802我的世界.wld"
-DATED_PATTERN = re.compile(r"^(\d{8})(.+)$")
+# 匹配 YYYYMMDDHHMMSS+原名 格式: "20260802173025我的世界.wld"
+DATED_PATTERN = re.compile(r"^(\d{14})(.+)$")
 
 
 def parse_dated_filename(filename: str) -> Optional[tuple[str, str]]:
@@ -25,7 +25,7 @@ def parse_dated_filename(filename: str) -> Optional[tuple[str, str]]:
         date_str = match.group(1)
         original_name = match.group(2)
         # 基本校验：日期应该看起来合理
-        if len(date_str) == 8 and date_str.isdigit():
+        if len(date_str) == 14 and date_str.isdigit():
             return (date_str, original_name)
     return None
 
