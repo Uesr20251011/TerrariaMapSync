@@ -13,13 +13,14 @@ from logger import get_logger
 log = get_logger()
 
 
-def _find_map_files(worlds_path: str, base_name: str) -> dict[str, str]:
+def _find_map_files(worlds_path: str, base_name: str) -> dict:
     """
     在 Worlds 文件夹中查找地图及其备份文件
 
     base_name: 不含扩展名的地图名，如 "我的世界"
 
     返回 {"wld": path, "bak": path_or_None, "bak2": path_or_None}
+    注意：备份文件后缀是 .wld.bak 和 .wld.bak2（不是 .bak）
     """
     result = {"wld": None, "bak": None, "bak2": None}
 
@@ -28,12 +29,13 @@ def _find_map_files(worlds_path: str, base_name: str) -> dict[str, str]:
     if os.path.isfile(wld_path):
         result["wld"] = wld_path
 
-    bak_name = f"{base_name}.bak"
+    # 泰拉瑞亚的备份文件命名为: 地图名.wld.bak 和 地图名.wld.bak2
+    bak_name = f"{base_name}.wld.bak"
     bak_path = os.path.join(worlds_path, bak_name)
     if os.path.isfile(bak_path):
         result["bak"] = bak_path
 
-    bak2_name = f"{base_name}.bak2"
+    bak2_name = f"{base_name}.wld.bak2"
     bak2_path = os.path.join(worlds_path, bak2_name)
     if os.path.isfile(bak2_path):
         result["bak2"] = bak2_path
@@ -75,11 +77,15 @@ def upload_map(worlds_path: str, cache_dir: str, map_name: str) -> Tuple[bool, s
     today = datetime.now().strftime("%Y%m%d")
     log.info("步骤2: 复制文件，日期前缀: %s", today)
 
+    # 后缀映射: dict key -> 实际文件后缀
+    _ext_map = {"wld": "wld", "bak": "wld.bak", "bak2": "wld.bak2"}
+
     copied_files = []
     try:
         for ext, src_path in source_files.items():
             if src_path and os.path.isfile(src_path):
-                new_name = f"{today}{map_name}.{ext}"
+                real_ext = _ext_map.get(ext, ext)
+                new_name = f"{today}{map_name}.{real_ext}"
                 dst_path = os.path.join(cache_dir, new_name)
                 file_size = os.path.getsize(src_path)
                 log.info("  复制: %s -> %s (%d bytes)", src_path, new_name, file_size)
@@ -154,9 +160,9 @@ def download_map(worlds_path: str, cache_dir: str,
     except OSError as e:
         errors.append(f"复制 .wld 失败: {e}")
 
-    # 处理对应的 .bak 和 .bak2 文件
+    # 处理对应的备份文件（.wld.bak 和 .wld.bak2）
     dated_prefix = Path(dated_wld).stem  # "20260802我的世界"
-    for ext in ("bak", "bak2"):
+    for ext in ("wld.bak", "wld.bak2"):
         src_bak = os.path.join(cache_dir, f"{dated_prefix}.{ext}")
         dst_bak = os.path.join(worlds_path, f"{base_name}.{ext}")
         if os.path.isfile(src_bak):

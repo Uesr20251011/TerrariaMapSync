@@ -100,10 +100,10 @@ def scan_remote_maps(repo_cache_dir: str) -> dict[str, list[dict]]:
         # original_name 包含 .wld 后缀，提取纯地图名
         base_name = Path(original_name).stem  # 去掉 .wld
 
-        # 查找对应的备份文件
+        # 查找对应的备份文件（.wld.bak 和 .wld.bak2）
         dated_prefix = f"{date_str}{base_name}"
-        bak_file = f"{dated_prefix}.bak" if f"{dated_prefix}.bak" in all_files else None
-        bak2_file = f"{dated_prefix}.bak2" if f"{dated_prefix}.bak2" in all_files else None
+        bak_file = f"{dated_prefix}.wld.bak" if f"{dated_prefix}.wld.bak" in all_files else None
+        bak2_file = f"{dated_prefix}.wld.bak2" if f"{dated_prefix}.wld.bak2" in all_files else None
 
         entry = {
             "date": date_str,
