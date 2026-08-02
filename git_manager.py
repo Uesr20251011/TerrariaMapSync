@@ -1,8 +1,43 @@
 """Git 操作模块 — clone, pull, commit, push"""
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Tuple
+
+# gh.exe 路径（用于认证）
+_GH_PATH = r"C:\Program Files\GitHub CLI\gh.exe"
+
+# git-askpass 批处理脚本路径（由 _setup_auth 创建）
+_ASKPASS_PATH = os.path.join(
+    os.environ.get("APPDATA", ""), "TerrariaMapHelper", "git-askpass.bat"
+)
+
+
+def _setup_auth() -> dict[str, str]:
+    """准备带认证信息的环境变量"""
+    env = os.environ.copy()
+
+    # 确保 askpass 脚本存在
+    askpass_dir = os.path.dirname(_ASKPASS_PATH)
+    os.makedirs(askpass_dir, exist_ok=True)
+
+    if not os.path.isfile(_ASKPASS_PATH):
+        with open(_ASKPASS_PATH, "w", encoding="ascii") as f:
+            f.write(f'@echo off\r\n"{_GH_PATH}" auth token\r\n')
+
+    env["GIT_ASKPASS"] = _ASKPASS_PATH
+    # 禁用交互式提示，让 GIT_ASKPASS 生效
+    env["GIT_TERMINAL_PROMPT"] = "0"
+
+    # 确保 SSH URL 自动转为 HTTPS
+    subprocess.run(
+        ["git", "config", "--global",
+         "url.https://github.com/.insteadOf", "git@github.com:"],
+        capture_output=True, timeout=10,
+    )
+
+    return env
 
 
 def is_git_installed() -> bool:
@@ -21,6 +56,8 @@ def is_git_installed() -> bool:
 
 def _run_git(args: list[str], cwd: str) -> Tuple[bool, str]:
     """执行 git 命令，返回 (success, message)"""
+    env = _setup_auth()
+
     try:
         result = subprocess.run(
             ["git"] + args,
@@ -29,6 +66,7 @@ def _run_git(args: list[str], cwd: str) -> Tuple[bool, str]:
             text=True,
             timeout=120,
             encoding="utf-8",
+            env=env,
         )
         if result.returncode == 0:
             output = result.stdout.strip() or result.stderr.strip() or "成功"
@@ -85,9 +123,8 @@ def commit_and_push(cache_dir: str, files: list[str], message: str) -> Tuple[boo
     # git commit
     ok, msg = _run_git(["commit", "-m", message], cache_dir)
     if not ok:
-        # 检查是否 "nothing to commit"
         if "nothing to commit" in msg.lower() or "nothing added" in msg.lower():
-            pass  # 没有变更也算成功
+            pass
         else:
             return (False, f"git commit 失败: {msg}")
 
