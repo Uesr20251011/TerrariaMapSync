@@ -259,12 +259,18 @@ class MainWindow(QMainWindow):
         _log.info(">>> UI: GitWorker.start() 已返回")
 
     def _on_download_done(self, success: bool, message: str):
+        import logging
+        _log = logging.getLogger("TerrariaMapHelper")
+        _log.info(">>> _on_download_done 被调用 ok=%s msg=%s", success, message)
         self._set_ui_enabled(True)
+        _log.info(">>> _set_ui_enabled(True) 完成")
         if success:
             self.status_bar.showMessage(f"✓ {message}")
             self._refresh_local()
+            _log.info(">>> _refresh_local 完成")
         else:
             self.status_bar.showMessage(f"✗ {message}")
+        _log.info(">>> _on_download_done 全部完成")
             QMessageBox.warning(self, "下载失败", message)
 
     # ==================== 工具方法 ====================
