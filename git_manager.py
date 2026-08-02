@@ -2,35 +2,45 @@
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Tuple
 
 # gh.exe 路径（用于认证）
 _GH_PATH = r"C:\Program Files\GitHub CLI\gh.exe"
 
-# git-askpass 批处理脚本路径（由 _setup_auth 创建）
-_ASKPASS_PATH = os.path.join(
-    os.environ.get("APPDATA", ""), "TerrariaMapHelper", "git-askpass.bat"
-)
+# git-askpass Python 脚本路径
+_ASKPASS_DIR = os.path.join(os.environ.get("APPDATA", ""), "TerrariaMapHelper")
+_ASKPASS_SCRIPT = os.path.join(_ASKPASS_DIR, "git-askpass.py")
+
+
+def _ensure_askpass_script() -> str:
+    """确保 askpass Python 脚本存在，返回 GIT_ASKPASS 值"""
+    os.makedirs(_ASKPASS_DIR, exist_ok=True)
+
+    if not os.path.isfile(_ASKPASS_SCRIPT):
+        with open(_ASKPASS_SCRIPT, "w", encoding="ascii") as f:
+            f.write(
+                'import subprocess, sys\r\n'
+                f'r = subprocess.run([r"{_GH_PATH}", "auth", "token"],'
+                f' capture_output=True, text=True, timeout=10)\r\n'
+                'if r.returncode == 0:\r\n'
+                '    print(r.stdout.strip())\r\n'
+                'else:\r\n'
+                '    sys.exit(1)\r\n'
+            )
+
+    # 返回 "python.exe path/to/askpass.py"
+    return f"{sys.executable} {_ASKPASS_SCRIPT}"
 
 
 def _setup_auth() -> dict[str, str]:
     """准备带认证信息的环境变量"""
     env = os.environ.copy()
-
-    # 确保 askpass 脚本存在
-    askpass_dir = os.path.dirname(_ASKPASS_PATH)
-    os.makedirs(askpass_dir, exist_ok=True)
-
-    if not os.path.isfile(_ASKPASS_PATH):
-        with open(_ASKPASS_PATH, "w", encoding="ascii") as f:
-            f.write(f'@echo off\r\n"{_GH_PATH}" auth token\r\n')
-
-    env["GIT_ASKPASS"] = _ASKPASS_PATH
-    # 禁用交互式提示，让 GIT_ASKPASS 生效
+    env["GIT_ASKPASS"] = _ensure_askpass_script()
     env["GIT_TERMINAL_PROMPT"] = "0"
 
-    # 确保 SSH URL 自动转为 HTTPS
+    # 确保 SSH URL 自动转为 HTTPS（一次性的全局配置）
     subprocess.run(
         ["git", "config", "--global",
          "url.https://github.com/.insteadOf", "git@github.com:"],
@@ -86,14 +96,12 @@ def clone_repo(repo_url: str, cache_dir: str) -> Tuple[bool, str]:
     """克隆仓库到本地缓存目录"""
     cache_path = Path(cache_dir)
 
-    # 如果目录已存在且是 git 仓库，则跳过克隆
     if cache_path.exists() and (cache_path / ".git").exists():
         return (True, "仓库已存在")
 
-    # 如果目录存在但不是 git 仓库，先删除
     if cache_path.exists():
         import shutil
-        shutil.rmtree(cache_path)
+        shutil.rmtree(cache_path, ignore_errors=True)
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -108,19 +116,14 @@ def pull_repo(cache_dir: str) -> Tuple[bool, str]:
 
 
 def commit_and_push(cache_dir: str, files: list[str], message: str) -> Tuple[bool, str]:
-    """
-    添加文件、提交并推送到远程仓库
-    files: 相对于 cache_dir 的文件名列表
-    """
+    """添加文件、提交并推送到远程仓库"""
     if not (Path(cache_dir) / ".git").exists():
         return (False, "仓库尚未克隆")
 
-    # git add
     ok, msg = _run_git(["add"] + files, cache_dir)
     if not ok:
         return (False, f"git add 失败: {msg}")
 
-    # git commit
     ok, msg = _run_git(["commit", "-m", message], cache_dir)
     if not ok:
         if "nothing to commit" in msg.lower() or "nothing added" in msg.lower():
@@ -128,7 +131,6 @@ def commit_and_push(cache_dir: str, files: list[str], message: str) -> Tuple[boo
         else:
             return (False, f"git commit 失败: {msg}")
 
-    # git push
     ok, msg = _run_git(["push"], cache_dir)
     if not ok:
         return (False, f"git push 失败: {msg}")
