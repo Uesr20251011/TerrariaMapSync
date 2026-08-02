@@ -16,33 +16,21 @@ _CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 _GH_PATH = r"C:\Program Files\GitHub CLI\gh.exe"
 _APP_DIR = os.path.join(os.environ.get("APPDATA", ""), "TerrariaMapHelper")
-
-# PyInstaller 打包检测
 _FROZEN = getattr(sys, "frozen", False)
-
-# askpass 助手路径
-if _FROZEN:
-    # 打包后：同目录下的 askpass 控制台 exe
-    _EXE_DIR = os.path.dirname(sys.executable)
-    _ASKPASS_EXE = os.path.join(_EXE_DIR, "TerrariaMapSync-askpass.exe")
-    _ASKPASS_CMD = _ASKPASS_EXE
-else:
-    # 开发环境：Python 脚本
-    _ASKPASS_SCRIPT = os.path.join(_APP_DIR, "git-askpass.py")
-    _ASKPASS_CMD = None  # 动态创建
 
 
 def _ensure_askpass_cmd() -> str:
     """返回 GIT_ASKPASS 命令字符串"""
     if _FROZEN:
-        log.info("askpass 模式: 打包 exe (%s)", _ASKPASS_EXE)
-        return _ASKPASS_EXE
+        # 打包后：单 exe，自身带 --askpass 参数
+        return f'"{sys.executable}" --askpass'
     else:
-        # 开发环境：创建 Python 脚本并用 sys.executable 调用
+        # 开发环境：Python 脚本
+        script = os.path.join(_APP_DIR, "git-askpass.py")
         os.makedirs(_APP_DIR, exist_ok=True)
-        if not os.path.isfile(_ASKPASS_SCRIPT):
-            log.info("创建 git-askpass 脚本: %s", _ASKPASS_SCRIPT)
-            with open(_ASKPASS_SCRIPT, "w", encoding="ascii") as f:
+        if not os.path.isfile(script):
+            log.info("创建 git-askpass 脚本: %s", script)
+            with open(script, "w", encoding="ascii") as f:
                 f.write(
                     'import subprocess, sys\r\n'
                     f'r = subprocess.run([r"{_GH_PATH}", "auth", "token"],'
@@ -53,7 +41,7 @@ def _ensure_askpass_cmd() -> str:
                     'else:\r\n'
                     '    sys.exit(1)\r\n'
                 )
-        return f"{sys.executable} {_ASKPASS_SCRIPT}"
+        return f"{sys.executable} {script}"
 
 
 def _setup_auth() -> dict[str, str]:

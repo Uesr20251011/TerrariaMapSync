@@ -1,33 +1,64 @@
-"""泰拉瑞亚联机地图同步小助手 — 程序入口"""
+"""泰拉瑞亚联机地图同步助手 — 程序入口
+
+支持两种模式:
+- 普通启动: 显示 GUI
+- --askpass 模式: 输出 GitHub token 并退出 (供 git 凭据调用)
+"""
 
 import sys
+import os
 
-from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
 
-from config_manager import load_config, APP_NAME
-from ui.main_window import MainWindow
+def _run_askpass():
+    """输出 GitHub token 到 stdout，不启动 GUI"""
+    import subprocess
+
+    gh = r"C:\Program Files\GitHub CLI\gh.exe"
+    if not os.path.isfile(gh):
+        sys.exit(1)
+
+    cf = 0x08000000 if sys.platform == "win32" else 0
+    r = subprocess.run(
+        [gh, "auth", "token"],
+        capture_output=True, text=True, timeout=10,
+        creationflags=cf,
+    )
+    if r.returncode == 0:
+        print(r.stdout.strip())
+    else:
+        sys.exit(1)
 
 
 def main():
-    # 高DPI适配 (PySide6 默认已启用，此处为兼容旧版)
-    aa = Qt.ApplicationAttribute
-    QApplication.setAttribute(aa.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(aa.AA_UseHighDpiPixmaps, True)
+    # ====== askpass 模式 ======
+    if "--askpass" in sys.argv:
+        _run_askpass()
+        return
 
+    # ====== GUI 模式 ======
+    # 隐藏控制台窗口（因为用 --console 打包）
+    if sys.platform == "win32":
+        import ctypes
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
+
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QFont
+
+    from config_manager import load_config, APP_NAME
+    from ui.main_window import MainWindow
+
+    # 高 DPI
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(APP_NAME)
 
-    # 设置默认字体，确保中文正常显示
     font = QFont("Microsoft YaHei", 9)
     app.setFont(font)
 
-    # 加载配置
     config = load_config()
-
-    # 创建并显示主窗口
     window = MainWindow(config)
     window.show()
 
