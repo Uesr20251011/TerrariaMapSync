@@ -278,7 +278,7 @@ class MainWindow(QMainWindow):
     def _set_ui_enabled(self, enabled: bool):
         """操作期间禁用 UI"""
         self.settings_bar.setEnabled(enabled)
-        self.local_panel.upload_btn.setEnabled(enabled and len(self.local_panel.map_list) > 0)
+        self.local_panel.upload_btn.setEnabled(enabled and self.local_panel.map_list.count() > 0)
         self.remote_panel.download_btn.setEnabled(enabled)
         self.local_panel.refresh_btn.setEnabled(enabled)
         self.remote_panel.refresh_btn.setEnabled(enabled)
