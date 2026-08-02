@@ -1,8 +1,12 @@
 """主窗口"""
 
+import os
+from datetime import datetime
+
 from PySide6.QtWidgets import (
     QMainWindow, QVBoxLayout, QWidget, QSplitter,
-    QStatusBar, QMessageBox, QApplication,
+    QStatusBar, QMessageBox, QApplication, QFileDialog,
+    QHBoxLayout, QLabel, QPushButton,
 )
 from PySide6.QtCore import QThread, Signal, Qt
 
@@ -77,6 +81,25 @@ class MainWindow(QMainWindow):
 
         splitter.setSizes([400, 500])
         main_layout.addWidget(splitter, stretch=1)
+
+        # === 底部：日志提示 + 状态栏 ===
+        bottom_widget = QWidget()
+        bottom_layout = QHBoxLayout(bottom_widget)
+        bottom_layout.setContentsMargins(6, 2, 6, 2)
+
+        hint = QLabel("💡 遇到问题？请")
+        bottom_layout.addWidget(hint)
+
+        export_btn = QPushButton("📋 导出日志")
+        export_btn.setFixedWidth(100)
+        export_btn.clicked.connect(self._export_log)
+        bottom_layout.addWidget(export_btn)
+
+        hint2 = QLabel("发送给作者")
+        bottom_layout.addWidget(hint2)
+
+        bottom_layout.addStretch()
+        main_layout.addWidget(bottom_widget)
 
         # === 底部状态栏 ===
         self.status_bar = QStatusBar()
@@ -236,6 +259,27 @@ class MainWindow(QMainWindow):
         self.remote_panel.download_btn.setEnabled(enabled)
         self.local_panel.refresh_btn.setEnabled(enabled)
         self.remote_panel.refresh_btn.setEnabled(enabled)
+
+    def _export_log(self):
+        """导出日志文件"""
+        from logger import log_path
+        src = log_path()
+
+        if not os.path.isfile(src):
+            QMessageBox.information(self, "提示", "暂无日志文件，请先执行操作")
+            return
+
+        dest, _ = QFileDialog.getSaveFileName(
+            self, "导出日志", f"TerrariaMapHelper_{datetime.now().strftime('%Y%m%d')}.log",
+            "日志文件 (*.log)"
+        )
+        if dest:
+            try:
+                import shutil
+                shutil.copy2(src, dest)
+                QMessageBox.information(self, "导出成功", f"日志已保存到:\n{dest}")
+            except OSError as e:
+                QMessageBox.critical(self, "导出失败", str(e))
 
     def _check_git(self):
         """检查 Git 是否安装"""
