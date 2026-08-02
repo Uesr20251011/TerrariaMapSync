@@ -270,8 +270,8 @@ class MainWindow(QMainWindow):
             _log.info(">>> _refresh_local 完成")
         else:
             self.status_bar.showMessage(f"✗ {message}")
-        _log.info(">>> _on_download_done 全部完成")
             QMessageBox.warning(self, "下载失败", message)
+        _log.info(">>> _on_download_done 全部完成")
 
     # ==================== 工具方法 ====================
 
