@@ -11,6 +11,9 @@ from logger import get_logger
 
 log = get_logger()
 
+# Windows 下禁止 subprocess 弹出控制台窗口
+_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
 _GH_PATH = r"C:\Program Files\GitHub CLI\gh.exe"
 _ASKPASS_DIR = os.path.join(os.environ.get("APPDATA", ""), "TerrariaMapHelper")
 _ASKPASS_SCRIPT = os.path.join(_ASKPASS_DIR, "git-askpass.py")
@@ -26,7 +29,8 @@ def _ensure_askpass_script() -> str:
             f.write(
                 'import subprocess, sys\r\n'
                 f'r = subprocess.run([r"{_GH_PATH}", "auth", "token"],'
-                f' capture_output=True, text=True, timeout=10)\r\n'
+                f' capture_output=True, text=True, timeout=10,'
+                f' creationflags=0x08000000 if sys.platform == "win32" else 0)\r\n'
                 'if r.returncode == 0:\r\n'
                 '    print(r.stdout.strip())\r\n'
                 'else:\r\n'
@@ -46,6 +50,7 @@ def _setup_auth() -> dict[str, str]:
         ["git", "config", "--global",
          "url.https://github.com/.insteadOf", "git@github.com:"],
         capture_output=True, timeout=10,
+        creationflags=_CREATION_FLAGS,
     )
 
     return env
@@ -57,6 +62,7 @@ def is_git_installed() -> bool:
         subprocess.run(
             ["git", "--version"],
             capture_output=True, check=True, timeout=10,
+            creationflags=_CREATION_FLAGS,
         )
         return True
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
@@ -80,6 +86,7 @@ def _run_git(args: list[str], cwd: str) -> Tuple[bool, str]:
             timeout=120,
             encoding="utf-8",
             env=env,
+            creationflags=_CREATION_FLAGS,
         )
         elapsed = time.time() - start
         stdout = result.stdout.strip()
