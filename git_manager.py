@@ -141,6 +141,10 @@ def pull_repo(cache_dir: str) -> Tuple[bool, str]:
         log.error("仓库未克隆: %s", cache_dir)
         return (False, "仓库尚未克隆，请先设置仓库地址")
 
+    # 先清理所有本地修改，确保工作区干净
+    _run_git(["reset", "--hard", "HEAD"], cache_dir)
+    _run_git(["clean", "-fd"], cache_dir)
+
     return _run_git(["pull", "--rebase"], cache_dir)
 
 
