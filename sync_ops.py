@@ -103,18 +103,24 @@ def upload_map(worlds_path: str, cache_dir: str, map_name: str) -> Tuple[bool, s
             log.error("提交推送失败: %s", msg)
             return (False, msg)
 
+        # 推送成功后 reset 工作区，让新文件在目录中可见
+        log.info("步骤4: 同步工作区...")
+        import subprocess as _sp
+        _sp.run(["git", "reset", "--hard", "HEAD"], cwd=cache_dir,
+                capture_output=True, timeout=10, creationflags=0x08000000)
+
         log.info("========== 上传成功 ==========")
         return (True, f"成功上传 {map_name} ({today})")
 
     finally:
-        # 清理 cache_dir 中的副本
-        log.info("步骤4: 清理临时文件...")
+        # 清理未跟踪的临时文件
+        log.info("清理临时文件...")
         for f in copied_files:
             f_path = os.path.join(cache_dir, f)
             try:
                 if os.path.isfile(f_path):
-                    os.remove(f_path)
-                    log.debug("  已删除: %s", f)
+                    # 文件已被 git 跟踪则 reset 已恢复它，无需删
+                    log.debug("  跳过: %s (已跟踪)", f)
             except OSError as e:
                 log.warning("  删除失败: %s - %s", f, e)
 
