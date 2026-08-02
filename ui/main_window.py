@@ -30,10 +30,15 @@ class GitWorker(QThread):
         self._kwargs = kwargs
 
     def run(self):
+        import logging
+        _log = logging.getLogger("TerrariaMapHelper")
+        _log.info(">>> GitWorker.run() 开始: %s", self._func.__name__)
         try:
             ok, msg = self._func(*self._args, **self._kwargs)
+            _log.info(">>> GitWorker.run() 完成: ok=%s", ok)
             self.finished.emit(ok, msg)
         except Exception as e:
+            _log.exception(">>> GitWorker.run() 异常")
             self.finished.emit(False, str(e))
 
 
@@ -225,12 +230,22 @@ class MainWindow(QMainWindow):
 
     def _download_map(self, dated_wld: str, original_name: str):
         """下载地图"""
+        import logging
+        _log = logging.getLogger("TerrariaMapHelper")
+        _log.info(">>> UI: _download_map 被调用 (%s)", original_name)
+
         worlds_path = self._config.get("worlds_path", "")
         cache_dir = self._config.get("repo_cache_dir", "")
 
         if not worlds_path or not cache_dir:
             QMessageBox.warning(self, "提示", "请先设置地图文件夹和仓库地址")
             return
+
+        # 杀掉可能残留的旧 worker
+        if self._worker and self._worker.isRunning():
+            _log.warning("旧 worker 仍在运行，等待终止...")
+            self._worker.quit()
+            self._worker.wait(3000)
 
         self._set_ui_enabled(False)
         self.status_bar.showMessage(f"正在下载 {original_name}...")
@@ -239,7 +254,9 @@ class MainWindow(QMainWindow):
             download_map, worlds_path, cache_dir, dated_wld, original_name
         )
         self._worker.finished.connect(self._on_download_done)
+        _log.info(">>> UI: 启动 GitWorker 线程...")
         self._worker.start()
+        _log.info(">>> UI: GitWorker.start() 已返回")
 
     def _on_download_done(self, success: bool, message: str):
         self._set_ui_enabled(True)
