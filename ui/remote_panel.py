@@ -70,7 +70,8 @@ class RemotePanel(QGroupBox):
             map_item.setExpanded(True)
 
             for i, ver in enumerate(versions):
-                label = ver["date"]
+                # 显示完整文件名（含日期前缀）
+                label = ver["wld"]
                 if i == 0:
                     label += "  (最新)"
 
