@@ -73,7 +73,7 @@ class LocalPanel(QGroupBox):
         reply = QMessageBox.question(
             self, "确认上传",
             f"确定要上传地图 \"{display_name}\" 到云端吗？\n\n"
-            f"上传后将以日期前缀命名，例如 {self._today()}{display_name}.wld",
+            f"云端文件名: {self._today()}{display_name}.wld",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )

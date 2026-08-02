@@ -8,6 +8,9 @@ from typing import Tuple
 
 from git_manager import pull_repo, commit_and_push
 from map_scanner import is_backup_file
+from logger import get_logger
+
+log = get_logger()
 
 
 def _find_map_files(worlds_path: str, base_name: str) -> dict[str, str]:
@@ -50,49 +53,64 @@ def upload_map(worlds_path: str, cache_dir: str, map_name: str) -> Tuple[bool, s
 
     map_name: 不含 .wld 扩展名的地图名，如 "我的世界"
     """
+    log.info("========== 开始上传地图 ==========")
+    log.info("地图名: %s, 源路径: %s", map_name, worlds_path)
+
     # 先拉取最新
+    log.info("步骤1: 拉取最新...")
     ok, msg = pull_repo(cache_dir)
     if not ok:
+        log.error("拉取失败: %s", msg)
         return (False, f"拉取云端更新失败: {msg}")
 
     # 查找源文件
     source_files = _find_map_files(worlds_path, map_name)
     if not source_files["wld"]:
+        log.error("未找到地图文件: %s.wld", map_name)
         return (False, f"未找到地图文件: {map_name}.wld")
+    log.info("找到源文件: wld=%s, bak=%s, bak2=%s",
+             bool(source_files["wld"]), bool(source_files["bak"]), bool(source_files["bak2"]))
 
     # 生成日期前缀
     today = datetime.now().strftime("%Y%m%d")
+    log.info("步骤2: 复制文件，日期前缀: %s", today)
 
-    # 复制到 cache_dir 并重命名
     copied_files = []
     try:
         for ext, src_path in source_files.items():
             if src_path and os.path.isfile(src_path):
                 new_name = f"{today}{map_name}.{ext}"
                 dst_path = os.path.join(cache_dir, new_name)
+                file_size = os.path.getsize(src_path)
+                log.info("  复制: %s -> %s (%d bytes)", src_path, new_name, file_size)
                 shutil.copy2(src_path, dst_path)
                 copied_files.append(new_name)
 
         if not copied_files:
+            log.error("没有文件可上传")
             return (False, "没有文件可上传")
 
-        # Git 提交推送
+        log.info("步骤3: 提交推送 %d 个文件...", len(copied_files))
         message = f"上传地图 {map_name} - {today}"
         ok, msg = commit_and_push(cache_dir, copied_files, message)
         if not ok:
+            log.error("提交推送失败: %s", msg)
             return (False, msg)
 
+        log.info("========== 上传成功 ==========")
         return (True, f"成功上传 {map_name} ({today})")
 
     finally:
         # 清理 cache_dir 中的副本
+        log.info("步骤4: 清理临时文件...")
         for f in copied_files:
             f_path = os.path.join(cache_dir, f)
             try:
                 if os.path.isfile(f_path):
                     os.remove(f_path)
-            except OSError:
-                pass
+                    log.debug("  已删除: %s", f)
+            except OSError as e:
+                log.warning("  删除失败: %s - %s", f, e)
 
 
 def download_map(worlds_path: str, cache_dir: str,
