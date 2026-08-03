@@ -13,8 +13,8 @@ def parse_dated_filename(filename: str) -> Optional[tuple[str, str]]:
     """
     解析日期前缀文件名，返回 (date_str, original_name) 或 None
 
-    >>> parse_dated_filename("20260802我的世界.wld")
-    ('20260802', '我的世界.wld')
+    >>> parse_dated_filename("20260802173025我的世界.wld")
+    ('20260802173025', '我的世界.wld')
     >>> parse_dated_filename("我的世界.wld")
     None
     """
@@ -25,7 +25,7 @@ def parse_dated_filename(filename: str) -> Optional[tuple[str, str]]:
         date_str = match.group(1)
         original_name = match.group(2)
         # 基本校验：日期应该看起来合理
-        if len(date_str) == 14 and date_str.isdigit():
+        if date_str.isdigit():
             return (date_str, original_name)
     return None
 
@@ -67,14 +67,14 @@ def scan_remote_maps(repo_cache_dir: str) -> dict[str, list[dict]]:
     """
     扫描本地 Git 缓存仓库中的云端地图
 
-    解析 YYYYMMDD原名.wld 格式，按原名分组，每组内按日期降序排序
+    解析 YYYYMMDDHHMMSS原名.wld 格式，按原名分组，每组内按日期降序排序
     同时查找对应的 .bak, .bak2 文件
 
     返回结构:
     {
         "我的世界": [
-            {"date": "20260802", "wld": "20260802我的世界.wld",
-             "bak": "20260802我的世界.bak", "bak2": "20260802我的世界.bak2"},
+            {"date": "20260802173025", "wld": "20260802173025我的世界.wld",
+             "bak": "20260802173025我的世界.bak", "bak2": "20260802173025我的世界.bak2"},
             ...
         ],
         ...

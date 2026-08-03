@@ -57,7 +57,7 @@ class RemotePanel(QGroupBox):
         self.tree.clear()
 
         if not remote_maps:
-            root = QTreeWidgetItem(self.tree, ["（云端暂无地图）", ""])
+            root = QTreeWidgetItem(self.tree, ["（云端暂无地图）", "", ""])
             root.setFlags(root.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             self.download_btn.setEnabled(False)
             return
@@ -77,8 +77,6 @@ class RemotePanel(QGroupBox):
                 d = ver["date"]
                 if len(d) == 14:
                     date_display = f"{d[0:4]}年{d[4:6]}月{d[6:8]}日 {d[8:10]}:{d[10:12]}:{d[12:14]}"
-                elif len(d) == 8:
-                    date_display = f"{d[0:4]}年{d[4:6]}月{d[6:8]}日"
                 else:
                     date_display = d
                 # 操作栏文字
