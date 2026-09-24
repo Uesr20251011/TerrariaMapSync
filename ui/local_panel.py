@@ -22,13 +22,15 @@ class LocalPanel(QGroupBox):
 
         # 地图列表
         self.map_list = QListWidget()
-        self.map_list.setAlternatingRowColors(True)
+        self.map_list.setAlternatingRowColors(False)
+        self.map_list.currentItemChanged.connect(self._selection_changed)
         main_layout.addWidget(self.map_list)
 
         # 按钮栏
         btn_layout = QHBoxLayout()
 
         self.upload_btn = QPushButton("⬆ 上传选中地图")
+        self.upload_btn.setProperty("variant", "primary")
         self.upload_btn.clicked.connect(self._on_upload)
         self.upload_btn.setEnabled(False)
         btn_layout.addWidget(self.upload_btn)
@@ -60,7 +62,12 @@ class LocalPanel(QGroupBox):
             item.setData(1, map_name)  # 存储完整文件名
             self.map_list.addItem(item)
 
-        self.upload_btn.setEnabled(True)
+        self.map_list.setCurrentRow(0)
+        self._selection_changed()
+
+    def _selection_changed(self, *_args):
+        selected = self.map_list.currentItem()
+        self.upload_btn.setEnabled(bool(selected and selected.data(1)))
 
     def _on_upload(self):
         """上传当前选中的地图"""
@@ -70,18 +77,4 @@ class LocalPanel(QGroupBox):
             return
 
         display_name = selected.text()
-        reply = QMessageBox.question(
-            self, "确认上传",
-            f"确定要上传地图 \"{display_name}\" 到云端吗？\n\n"
-            f"云端文件名: {self._today()}{display_name}.wld",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-
-        if reply == QMessageBox.StandardButton.Yes:
-            self.upload_requested.emit(display_name)
-
-    @staticmethod
-    def _today() -> str:
-        from datetime import datetime
-        return datetime.now().strftime("%Y%m%d%H%M%S")
+        self.upload_requested.emit(display_name)

@@ -24,18 +24,20 @@ class RemotePanel(QGroupBox):
         main_layout = QVBoxLayout(self)
 
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["地图 / 版本", "时间", "操作"])
+        self.tree.setHeaderLabels(["地图 / 版本", "时间", "状态"])
         self.tree.setColumnWidth(0, 240)
         self.tree.setColumnWidth(1, 100)
         self.tree.setColumnWidth(2, 120)
-        self.tree.setAlternatingRowColors(True)
+        self.tree.setAlternatingRowColors(False)
         self.tree.setRootIsDecorated(True)
+        self.tree.currentItemChanged.connect(self._selection_changed)
         main_layout.addWidget(self.tree)
 
         # 按钮栏
         btn_layout = QHBoxLayout()
 
         self.download_btn = QPushButton("⬇ 下载选中版本")
+        self.download_btn.setProperty("variant", "primary")
         self.download_btn.clicked.connect(self._on_download)
         self.download_btn.setEnabled(False)
         btn_layout.addWidget(self.download_btn)
@@ -65,6 +67,7 @@ class RemotePanel(QGroupBox):
         bold_font = QFont()
         bold_font.setBold(True)
 
+        first_version = None
         for map_name, versions in remote_maps.items():
             # 一级节点：地图名
             map_item = QTreeWidgetItem(self.tree, [map_name, "", ""])
@@ -80,17 +83,25 @@ class RemotePanel(QGroupBox):
                 else:
                     date_display = d
                 # 操作栏文字
-                op_text = "⬇ 下载(最新)" if i == 0 else "⬇ 下载"
+                op_text = "最新版本" if i == 0 else "历史版本"
 
                 ver_item = QTreeWidgetItem(map_item, [original_name, date_display, op_text])
                 ver_item.setData(0, 1, ver["wld"])   # 存储完整文件名
                 ver_item.setData(0, 2, original_name)  # 存储原名
+                if first_version is None:
+                    first_version = ver_item
 
                 if i == 0:
                     ver_item.setFont(0, bold_font)
                     ver_item.setFont(1, bold_font)
 
-        self.download_btn.setEnabled(True)
+        if first_version is not None:
+            self.tree.setCurrentItem(first_version)
+        self._selection_changed()
+
+    def _selection_changed(self, *_args):
+        selected = self.tree.currentItem()
+        self.download_btn.setEnabled(bool(selected and selected.data(0, 1)))
 
     def _on_download(self):
         """下载当前选中的版本"""
@@ -107,13 +118,4 @@ class RemotePanel(QGroupBox):
             QMessageBox.information(self, "提示", "请选择具体的版本，而不是地图名")
             return
 
-        reply = QMessageBox.question(
-            self, "确认下载",
-            f"确定要下载 \"{current.text(0)}\" 吗？\n\n"
-            f"将覆盖本地地图: {original_name}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-
-        if reply == QMessageBox.StandardButton.Yes:
-            self.download_requested.emit(dated_wld, original_name)
+        self.download_requested.emit(dated_wld, original_name)
