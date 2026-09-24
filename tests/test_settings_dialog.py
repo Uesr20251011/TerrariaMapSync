@@ -57,6 +57,23 @@ class SettingsDialogTests(unittest.TestCase):
             self.assertFalse(config["setup_complete"])
             dialog.close()
 
+    def test_private_repository_guidance_can_be_copied(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = {"worlds_path": directory,
+                      "repo_url": "https://github.com/owner/maps.git",
+                      "repo_cache_dir": os.path.join(directory, "cache"),
+                      "setup_complete": False, "github_login": "player"}
+            dialog = SettingsDialog(config)
+            result = {key: (True, "ok") for key in ("git", "cli", "auth")}
+            result.update(repo=(False, "需要仓库邀请"), login="player", avatar=b"",
+                          request_text="请邀请 @player")
+            with patch("ui.settings_dialog.save_config"):
+                dialog._connection_checked(result)
+            self.assertFalse(dialog.copy_request_button.isHidden())
+            dialog.copy_request_button.click()
+            self.assertEqual(QApplication.clipboard().text(), "请邀请 @player")
+            dialog.close()
+
 
 if __name__ == "__main__":
     unittest.main()

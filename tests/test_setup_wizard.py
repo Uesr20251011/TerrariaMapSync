@@ -7,6 +7,7 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from PySide6.QtCore import QEventLoop, QProcess, QTimer
 from PySide6.QtWidgets import QApplication
+from repository_access import RepositoryConnection
 from ui.setup_wizard import LoginPage, RequirementsPage, SetupWizard
 
 
@@ -81,7 +82,8 @@ class SetupWizardTests(unittest.TestCase):
             self.assertFalse(page.isComplete())
 
             with patch("ui.setup_wizard.save_config"):
-                with patch("ui.setup_wizard.clone_repo", return_value=(True, "ok")):
+                with patch("ui.setup_wizard.connect_repository",
+                           return_value=RepositoryConnection(True, "ok")):
                     page.check_repository()
                     loop = QEventLoop()
                     page.completeChanged.connect(loop.quit)
@@ -92,6 +94,26 @@ class SetupWizardTests(unittest.TestCase):
             with patch("ui.setup_wizard.save_config"):
                 wizard.accept()
             self.assertTrue(config["setup_complete"])
+            wizard.close()
+
+    def test_missing_access_offers_copyable_owner_invitation_text(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = {"worlds_path": directory, "repo_url": "",
+                      "repo_cache_dir": os.path.join(directory, "cache"),
+                      "setup_complete": False, "github_login": "map-player"}
+            with patch("ui.setup_wizard.check_git_installation", return_value=(True, "git")):
+                with patch("ui.setup_wizard.check_github_cli", return_value=(True, "gh")):
+                    wizard = SetupWizard(config)
+            page = wizard.repository_page
+            page.worlds_edit.setText(directory)
+            page.repo_edit.setText("https://github.com/owner/maps.git")
+            page._checked_values = (directory, page.repo_edit.text())
+            page._on_repository_checked(RepositoryConnection(
+                False, "仓库地址有误或尚无权限", "请邀请 @map-player"))
+            self.assertFalse(page.isComplete())
+            self.assertFalse(page.copy_request_button.isHidden())
+            page.copy_request_button.click()
+            self.assertEqual(QApplication.clipboard().text(), "请邀请 @map-player")
             wizard.close()
 
 
