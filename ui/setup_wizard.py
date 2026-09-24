@@ -18,6 +18,21 @@ from setup_services import (
 from tool_paths import find_executable
 from ui.theme import apply_glass_backdrop
 
+GITHUB_DEVICE_URL = "https://github.com/login/device"
+
+
+def _set_detection_status(label: QLabel, installed: bool, title: str, detail: str):
+    if installed:
+        label.setText(f"✅ 电脑上已有 {title}，无需下载\n{detail}")
+        label.setStyleSheet("QLabel { background: rgba(39, 170, 142, 55); "
+                            "border: 1px solid #40C9AE; border-radius: 10px; "
+                            "padding: 12px; color: #E9FFF9; font-weight: 600; }")
+    else:
+        label.setText(f"❌ 尚未安装 {title}\n{detail}")
+        label.setStyleSheet("QLabel { background: rgba(194, 104, 90, 50); "
+                            "border: 1px solid #D48679; border-radius: 10px; "
+                            "padding: 12px; color: #FFECE8; font-weight: 600; }")
+
 
 class RequirementsPage(QWizardPage):
     def __init__(self):
@@ -30,15 +45,15 @@ class RequirementsPage(QWizardPage):
         self.gh_status = QLabel()
         layout.addWidget(QLabel("1. Git 负责传输地图。Windows 安装程序使用默认选项，逐步点“下一步”即可。"))
         layout.addWidget(self.git_status)
-        git_link = QPushButton("打开 Git 下载页")
-        git_link.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(GIT_DOWNLOAD_URL)))
-        layout.addWidget(git_link)
+        self.git_link = QPushButton("打开 Git 下载页")
+        self.git_link.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(GIT_DOWNLOAD_URL)))
+        layout.addWidget(self.git_link)
         layout.addSpacing(14)
         layout.addWidget(QLabel("2. GitHub CLI 负责网页登录。安装程序使用默认选项即可。"))
         layout.addWidget(self.gh_status)
-        gh_link = QPushButton("打开 GitHub CLI 下载页")
-        gh_link.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(GH_DOWNLOAD_URL)))
-        layout.addWidget(gh_link)
+        self.gh_link = QPushButton("打开 GitHub CLI 下载页")
+        self.gh_link.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(GH_DOWNLOAD_URL)))
+        layout.addWidget(self.gh_link)
         recheck = QPushButton("重新检测")
         recheck.clicked.connect(self.refresh)
         layout.addWidget(recheck)
@@ -48,8 +63,10 @@ class RequirementsPage(QWizardPage):
     def refresh(self):
         git_ok, git_message = check_git_installation()
         gh_ok, gh_message = check_github_cli()
-        self.git_status.setText(("✓ " if git_ok else "✗ ") + git_message)
-        self.gh_status.setText(("✓ " if gh_ok else "✗ ") + gh_message)
+        _set_detection_status(self.git_status, git_ok, "Git", git_message)
+        _set_detection_status(self.gh_status, gh_ok, "GitHub CLI", gh_message)
+        self.git_link.setVisible(not git_ok)
+        self.gh_link.setVisible(not gh_ok)
         self._ready = git_ok and gh_ok
         self.completeChanged.emit()
 
@@ -63,6 +80,8 @@ class LoginPage(QWizardPage):
         self.setTitle("登录 GitHub")
         self.setSubTitle("点击网页登录；验证码会自动复制到剪贴板，无需配置 SSH 密钥。")
         self._ready = False
+        self._login_output = ""
+        self._continued_login = False
         layout = QVBoxLayout(self)
         self.status = QLabel("等待检测")
         layout.addWidget(self.status)
@@ -70,6 +89,9 @@ class LoginPage(QWizardPage):
         self.login_button = QPushButton("打开浏览器登录")
         self.login_button.clicked.connect(self.start_login)
         buttons.addWidget(self.login_button)
+        self.browser_button = QPushButton("重新打开登录页面")
+        self.browser_button.clicked.connect(self.open_login_browser)
+        buttons.addWidget(self.browser_button)
         self.check_button = QPushButton("重新检测登录")
         self.check_button.clicked.connect(self.refresh)
         buttons.addWidget(self.check_button)
@@ -113,14 +135,25 @@ class LoginPage(QWizardPage):
         self._ready = False
         self.completeChanged.emit()
         self.output.clear()
-        self.status.setText("正在打开浏览器；验证码已请求复制到剪贴板…")
+        self._login_output = ""
+        self._continued_login = False
+        self.status.setText("正在启动网页登录；稍后可在浏览器中粘贴验证码…")
         self.login_button.setEnabled(False)
         self.login_process.start(gh, ["auth", "login", "--hostname", "github.com",
                                       "--git-protocol", "https", "--web", "--clipboard"])
+        self.open_login_browser()
+
+    def open_login_browser(self):
+        if not QDesktopServices.openUrl(QUrl(GITHUB_DEVICE_URL)):
+            self.status.setText(f"浏览器未能自动打开，请手动访问 {GITHUB_DEVICE_URL}")
 
     def _read_login_output(self):
         data = bytes(self.login_process.readAllStandardOutput()).decode("utf-8", errors="replace")
         self.output.insertPlainText(data)
+        self._login_output = (self._login_output + data)[-1000:]
+        if not self._continued_login and "press enter" in self._login_output.lower():
+            self._continued_login = True
+            self.login_process.write(b"\n")
 
     def _login_finished(self, _exit_code, _status):
         self._read_login_output()
