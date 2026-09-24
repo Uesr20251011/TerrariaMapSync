@@ -5,12 +5,12 @@ from pathlib import Path
 from PySide6.QtCore import QProcess, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
+    QApplication, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
     QPushButton, QVBoxLayout, QWizard, QWizardPage,
 )
 
 from config_manager import save_config
-from git_manager import clone_repo
+from repository_access import RepositoryConnection, connect_repository
 from setup_services import (
     GH_DOWNLOAD_URL, GIT_DOWNLOAD_URL, check_git_installation,
     check_github_cli, is_github_repo_url,
@@ -165,18 +165,20 @@ class LoginPage(QWizardPage):
 
 
 class RepositoryWorker(QThread):
-    result_ready = Signal(bool, str)
+    result_ready = Signal(object)
 
-    def __init__(self, repo_url: str, cache_dir: str):
+    def __init__(self, repo_url: str, cache_dir: str, login_hint: str):
         super().__init__()
         self.repo_url = repo_url
         self.cache_dir = cache_dir
+        self.login_hint = login_hint
 
     def run(self):
         try:
-            self.result_ready.emit(*clone_repo(self.repo_url, self.cache_dir))
+            self.result_ready.emit(connect_repository(
+                self.repo_url, self.cache_dir, self.login_hint))
         except Exception as error:
-            self.result_ready.emit(False, str(error))
+            self.result_ready.emit(RepositoryConnection(False, str(error)))
 
 
 class RepositoryPage(QWizardPage):
@@ -186,6 +188,7 @@ class RepositoryPage(QWizardPage):
         self._ready = False
         self._worker = None
         self._checked_values = None
+        self._request_text = ""
         self.setTitle("选择地图并连接仓库")
         self.setSubTitle("选择泰拉瑞亚 Worlds 文件夹，粘贴朋友分享的 GitHub 仓库地址。")
         layout = QVBoxLayout(self)
@@ -216,6 +219,10 @@ class RepositoryPage(QWizardPage):
         self.status = QLabel("完成检测后才能结束向导。")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self.copy_request_button = QPushButton("复制给拥有者的邀请文字")
+        self.copy_request_button.clicked.connect(self.copy_access_request)
+        self.copy_request_button.hide()
+        layout.addWidget(self.copy_request_button)
         layout.addStretch()
 
     def _browse(self):
@@ -226,7 +233,14 @@ class RepositoryPage(QWizardPage):
 
     def _invalidate(self, *_args):
         self._ready = False
+        self._request_text = ""
+        self.copy_request_button.hide()
         self.completeChanged.emit()
+
+    def copy_access_request(self):
+        if self._request_text:
+            QApplication.clipboard().setText(self._request_text)
+            self.status.setText("邀请文字已复制。请发给仓库拥有者，收到邀请后重新检测连接。")
 
     def check_repository(self):
         worlds = self.worlds_edit.text().strip()
@@ -243,8 +257,11 @@ class RepositoryPage(QWizardPage):
         self.worlds_edit.setEnabled(False)
         self.repo_edit.setEnabled(False)
         self._checked_values = (worlds, repo_url)
+        self._request_text = ""
+        self.copy_request_button.hide()
         self.status.setText("正在连接仓库，请稍候…")
-        self._worker = RepositoryWorker(repo_url, self._config["repo_cache_dir"])
+        self._worker = RepositoryWorker(repo_url, self._config["repo_cache_dir"],
+                                        self._config.get("github_login", ""))
         self._worker.result_ready.connect(self._on_repository_checked)
         worker = self._worker
         worker.finished.connect(lambda: self._release_worker(worker))
@@ -255,13 +272,16 @@ class RepositoryPage(QWizardPage):
             self._worker = None
         worker.deleteLater()
 
-    def _on_repository_checked(self, ok: bool, message: str):
+    def _on_repository_checked(self, result: RepositoryConnection):
         self.check_button.setEnabled(True)
         self.worlds_edit.setEnabled(True)
         self.repo_edit.setEnabled(True)
-        self.status.setText(("✓ " if ok else "✗ ") + message)
-        confirmed = ok and self._checked_values == (self.worlds_edit.text().strip(),
-                                                    self.repo_edit.text().strip())
+        self.status.setText(("✓ " if result.success else "✗ ") + result.message)
+        same_values = self._checked_values == (self.worlds_edit.text().strip(),
+                                               self.repo_edit.text().strip())
+        self._request_text = result.request_text if same_values else ""
+        self.copy_request_button.setVisible(bool(self._request_text))
+        confirmed = result.success and same_values
         self._ready = confirmed
         self.completeChanged.emit()
 

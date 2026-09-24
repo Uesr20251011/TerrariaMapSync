@@ -4,12 +4,12 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel,
+    QApplication, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QVBoxLayout,
 )
 
 from config_manager import save_config
-from git_manager import clone_repo
+from repository_access import connect_repository
 from setup_services import (
     check_git_installation, check_github_cli, check_github_login,
     is_github_repo_url, load_github_profile,
@@ -22,10 +22,11 @@ from ui.theme import apply_glass_backdrop
 class ConnectionWorker(QThread):
     result_ready = Signal(object)
 
-    def __init__(self, repo_url: str, cache_dir: str):
+    def __init__(self, repo_url: str, cache_dir: str, login_hint: str):
         super().__init__()
         self.repo_url = repo_url
         self.cache_dir = cache_dir
+        self.login_hint = login_hint
 
     def run(self):
         try:
@@ -33,8 +34,11 @@ class ConnectionWorker(QThread):
             cli_ok, cli_msg = check_github_cli()
             auth_ok, auth_msg = check_github_login() if cli_ok else (False, "请先安装 GitHub CLI")
             repo_ok, repo_msg = (False, "请先完成环境和登录检测")
+            request_text = ""
             if git_ok and cli_ok and auth_ok:
-                repo_ok, repo_msg = clone_repo(self.repo_url, self.cache_dir)
+                connection = connect_repository(self.repo_url, self.cache_dir, self.login_hint)
+                repo_ok, repo_msg = connection.success, connection.message
+                request_text = connection.request_text
             login, avatar = load_github_profile() if auth_ok else ("", b"")
         except Exception as error:
             git_ok, git_msg = False, "检测失败"
@@ -42,10 +46,12 @@ class ConnectionWorker(QThread):
             auth_ok, auth_msg = False, "检测失败"
             repo_ok, repo_msg = False, str(error)
             login, avatar = "", b""
+            request_text = ""
         self.result_ready.emit({
             "git": (git_ok, git_msg), "cli": (cli_ok, cli_msg),
             "auth": (auth_ok, auth_msg), "repo": (repo_ok, repo_msg),
             "login": login, "avatar": avatar,
+            "request_text": request_text,
         })
 
 
@@ -56,6 +62,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self._config = config
         self._worker = None
+        self._request_text = ""
         self.setWindowTitle("设置与连接检测")
         self.setMinimumSize(760, 500)
         layout = QVBoxLayout(self)
@@ -85,6 +92,10 @@ class SettingsDialog(QDialog):
         self.status.setObjectName("statusText")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self.copy_request_button = QPushButton("复制给拥有者的邀请文字")
+        self.copy_request_button.clicked.connect(self.copy_access_request)
+        self.copy_request_button.hide()
+        layout.addWidget(self.copy_request_button)
         actions = QHBoxLayout()
         self.rerun_button = QPushButton("重新运行使用向导")
         self.rerun_button.clicked.connect(self.rerun_wizard)
@@ -132,12 +143,15 @@ class SettingsDialog(QDialog):
         if not self.save_fields() or (self._worker and self._worker.isRunning()):
             return
         self.status.setText("正在检测 Git、账号与仓库连接…")
+        self._request_text = ""
+        self.copy_request_button.hide()
         self.test_button.setEnabled(False)
         self.save_button.setEnabled(False)
         self.rerun_button.setEnabled(False)
         self.worlds_edit.setEnabled(False)
         self.repo_edit.setEnabled(False)
-        self._worker = ConnectionWorker(self._config["repo_url"], self._config["repo_cache_dir"])
+        self._worker = ConnectionWorker(self._config["repo_url"], self._config["repo_cache_dir"],
+                                        self._config.get("github_login", ""))
         self._worker.result_ready.connect(self._connection_checked)
         worker = self._worker
         worker.finished.connect(lambda: self._release_worker(worker))
@@ -160,6 +174,8 @@ class SettingsDialog(QDialog):
             ok, message = result[key]
             lines.append(f"{'✓' if ok else '✗'} {title}：{message}")
         self.status.setText("\n".join(lines))
+        self._request_text = result.get("request_text", "")
+        self.copy_request_button.setVisible(bool(self._request_text))
         if result["login"]:
             self._config["github_login"] = result["login"]
             self.account.set_profile(result["login"], result["avatar"])
@@ -169,6 +185,11 @@ class SettingsDialog(QDialog):
         self._config["setup_complete"] = result["repo"][0]
         save_config(self._config)
         self.configuration_changed.emit()
+
+    def copy_access_request(self):
+        if self._request_text:
+            QApplication.clipboard().setText(self._request_text)
+            self.status.setText(self.status.text() + "\n邀请文字已复制，请发给仓库拥有者。")
 
     def rerun_wizard(self):
         wizard = SetupWizard(self._config, self)
