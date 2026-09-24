@@ -5,15 +5,66 @@ from unittest.mock import patch
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
-from PySide6.QtCore import QEventLoop, QTimer
+from PySide6.QtCore import QEventLoop, QProcess, QTimer
 from PySide6.QtWidgets import QApplication
-from ui.setup_wizard import SetupWizard
+from ui.setup_wizard import LoginPage, RequirementsPage, SetupWizard
 
 
 class SetupWizardTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_installed_tools_are_explicitly_marked_as_not_needing_download(self):
+        with patch("ui.setup_wizard.check_git_installation", return_value=(True, "git 2.51")):
+            with patch("ui.setup_wizard.check_github_cli", return_value=(True, "gh 2.97")):
+                page = RequirementsPage()
+        self.assertIn("电脑上已有 Git，无需下载", page.git_status.text())
+        self.assertIn("电脑上已有 GitHub CLI，无需下载", page.gh_status.text())
+        self.assertTrue(page.git_link.isHidden())
+        self.assertTrue(page.gh_link.isHidden())
+
+    def test_login_button_opens_default_browser_and_starts_cli(self):
+        page = LoginPage()
+
+        class FakeProcess:
+            def __init__(self):
+                self.started = None
+
+            def state(self):
+                return QProcess.ProcessState.NotRunning
+
+            def start(self, program, args):
+                self.started = (program, args)
+
+        fake = FakeProcess()
+        page.login_process = fake
+        with patch("ui.setup_wizard.find_executable", return_value="gh"):
+            with patch("ui.setup_wizard.QDesktopServices.openUrl", return_value=True) as open_url:
+                page.start_login()
+        self.assertEqual(fake.started[0], "gh")
+        self.assertIn("--web", fake.started[1])
+        self.assertTrue(open_url.called)
+        self.assertEqual(open_url.call_args.args[0].toString(), "https://github.com/login/device")
+
+    def test_login_cli_enter_prompt_is_answered_automatically(self):
+        page = LoginPage()
+
+        class FakeProcess:
+            def __init__(self):
+                self.writes = []
+
+            def readAllStandardOutput(self):
+                return b"Press Enter to open github.com in your browser..."
+
+            def write(self, data):
+                self.writes.append(data)
+
+        fake = FakeProcess()
+        page.login_process = fake
+        page._read_login_output()
+        page._read_login_output()
+        self.assertEqual(fake.writes, [b"\n"])
 
     def test_repository_is_checked_before_setup_is_complete(self):
         with tempfile.TemporaryDirectory() as directory:

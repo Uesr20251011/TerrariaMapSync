@@ -5,6 +5,7 @@ from unittest.mock import patch
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QHeaderView
 from ui.local_panel import LocalPanel
 from ui.remote_panel import RemotePanel
 
@@ -26,6 +27,17 @@ class PanelSelectionTests(unittest.TestCase):
                                      "bak": None, "bak2": None}]})
         self.assertEqual(panel.tree.currentItem().data(0, 1), "20260802120000Map.wld")
         self.assertTrue(panel.download_btn.isEnabled())
+
+    def test_remote_time_column_has_room_for_full_timestamp(self):
+        panel = RemotePanel()
+        panel.resize(860, 600)
+        panel.show()
+        self.app.processEvents()
+        header = panel.tree.header()
+        self.assertEqual(header.sectionResizeMode(0), QHeaderView.ResizeMode.Stretch)
+        self.assertGreaterEqual(panel.tree.columnWidth(1), 210)
+        self.assertLessEqual(panel.tree.columnWidth(2), 100)
+        panel.close()
 
     def test_selected_map_uploads_with_one_button_click(self):
         panel = LocalPanel()

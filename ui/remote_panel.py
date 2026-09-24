@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QGroupBox, QTreeWidget, QTreeWidgetItem,
+    QWidget, QVBoxLayout, QGroupBox, QHeaderView, QTreeWidget, QTreeWidgetItem,
     QPushButton, QHBoxLayout, QMessageBox,
 )
 from PySide6.QtCore import Signal, Qt
@@ -25,9 +25,13 @@ class RemotePanel(QGroupBox):
 
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["地图 / 版本", "时间", "状态"])
-        self.tree.setColumnWidth(0, 240)
-        self.tree.setColumnWidth(1, 100)
-        self.tree.setColumnWidth(2, 120)
+        header = self.tree.header()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.tree.setColumnWidth(1, 220)
+        self.tree.setColumnWidth(2, 84)
         self.tree.setAlternatingRowColors(False)
         self.tree.setRootIsDecorated(True)
         self.tree.currentItemChanged.connect(self._selection_changed)
