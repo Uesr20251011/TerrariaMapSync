@@ -1,82 +1,74 @@
 """Git 操作模块 — clone, pull, commit, push"""
 
 import os
+import json
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Tuple
 
 from logger import get_logger
+from tool_paths import find_executable
 
 log = get_logger()
 
 _CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-_GH_PATH = r"C:\Program Files\GitHub CLI\gh.exe"
-_APP_DIR = os.path.join(os.environ.get("APPDATA", ""), "TerrariaMapHelper")
-_FROZEN = getattr(sys, "frozen", False)
-
-# ===== 一次性全局 git 配置（仅首次 import 时执行） =====
-_did_init = False
 
 
-def _init_git_config():
-    """一次性配置 git（URL 改写 + 清理坏的 credential helper）"""
-    global _did_init
-    if _did_init:
-        return
-    _did_init = True
-
-    log.info("初始化 git 全局配置 (一次性)...")
-    cmd = ["git", "config", "--global",
-           "url.https://github.com/.insteadOf", "git@github.com:"]
-    subprocess.run(cmd, capture_output=True, timeout=10, creationflags=_CREATION_FLAGS)
-
-    # 清理可能残留的坏的 credential.helper
-    subprocess.run(
-        ["git", "config", "--global", "--unset", "credential.helper"],
-        capture_output=True, timeout=5, creationflags=_CREATION_FLAGS,
-    )
-    subprocess.run(
-        ["git", "config", "--global", "--unset-all", "credential.helper"],
-        capture_output=True, timeout=5, creationflags=_CREATION_FLAGS,
-    )
-
-
-def _ensure_askpass_cmd() -> str:
-    """返回 GIT_ASKPASS 环境变量值"""
-    if _FROZEN:
-        return f'"{sys.executable}" --askpass'
-    else:
-        script = os.path.join(_APP_DIR, "git-askpass.py")
-        os.makedirs(_APP_DIR, exist_ok=True)
-        if not os.path.isfile(script):
-            with open(script, "w", encoding="ascii") as f:
-                f.write(
-                    'import subprocess, sys\r\n'
-                    f'r = subprocess.run([r"{_GH_PATH}", "auth", "token"],'
-                    f' capture_output=True, text=True, timeout=10,'
-                    f' creationflags=0x08000000 if sys.platform == "win32" else 0)\r\n'
-                    'if r.returncode == 0:\r\n'
-                    '    print(r.stdout.strip())\r\n'
-                    'else:\r\n'
-                    '    sys.exit(1)\r\n'
-                )
-        return f"{sys.executable} {script}"
+def _commit_identity_args(cache_dir: str) -> tuple[list[str], str]:
+    """Use the user's GitHub no-reply identity when Git has no local identity."""
+    name_ok, _ = _run_git(["config", "user.name"], cache_dir)
+    email_ok, _ = _run_git(["config", "user.email"], cache_dir)
+    if name_ok and email_ok:
+        return ([], "")
+    gh = find_executable("gh")
+    if not gh:
+        return ([], "请先在使用向导中登录 GitHub")
+    try:
+        result = subprocess.run([gh, "api", "user", "--jq", "{login: .login, id: .id}"],
+                                capture_output=True, text=True, encoding="utf-8",
+                                timeout=15, creationflags=_CREATION_FLAGS)
+        if result.returncode != 0:
+            return ([], "无法取得 GitHub 账号信息，请在设置中重新检测登录")
+        profile = json.loads(result.stdout)
+        login, user_id = profile.get("login"), profile.get("id")
+        if not isinstance(login, str) or not login or not isinstance(user_id, int):
+            return ([], "GitHub 账号信息不完整")
+        return (["-c", f"user.name={login}", "-c",
+                 f"user.email={user_id}+{login}@users.noreply.github.com"], "")
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return ([], "无法取得 GitHub 账号信息，请在设置中重新检测登录")
 
 
 def _build_env() -> dict[str, str]:
     """构建带认证的子进程环境"""
-    _init_git_config()
     env = os.environ.copy()
-    env["GIT_ASKPASS"] = _ensure_askpass_cmd()
+    env.pop("GIT_ASKPASS", None)
     env["GIT_TERMINAL_PROMPT"] = "0"
+    # 只影响本次 Git 命令，不改动用户的全局 Git 设置。
+    index = int(env.get("GIT_CONFIG_COUNT", "0"))
+    env[f"GIT_CONFIG_KEY_{index}"] = "url.https://github.com/.insteadOf"
+    env[f"GIT_CONFIG_VALUE_{index}"] = "git@github.com:"
+    env[f"GIT_CONFIG_KEY_{index + 1}"] = "credential.helper"
+    env[f"GIT_CONFIG_VALUE_{index + 1}"] = ""
+    gh = find_executable("gh")
+    if gh:
+        env[f"GIT_CONFIG_KEY_{index + 2}"] = "credential.https://github.com.helper"
+        env[f"GIT_CONFIG_VALUE_{index + 2}"] = f'!"{gh}" auth git-credential'
+    env["GIT_CONFIG_COUNT"] = str(index + (3 if gh else 2))
     return env
 
 
 def is_git_installed() -> bool:
+    git = find_executable("git")
+    if not git:
+        return False
     try:
-        subprocess.run(["git", "--version"], capture_output=True,
+        subprocess.run([git, "--version"], capture_output=True,
                        check=True, timeout=10, creationflags=_CREATION_FLAGS)
         return True
     except Exception:
@@ -87,10 +79,13 @@ def _run_git(args: list[str], cwd: str) -> Tuple[bool, str]:
     cmd = "git " + " ".join(args)
     log.debug("执行: %s", cmd)
     env = _build_env()
+    git = find_executable("git")
+    if not git:
+        return (False, "未找到 Git，请先安装 Git")
     start = time.time()
     try:
         result = subprocess.run(
-            ["git"] + args, cwd=cwd, capture_output=True,
+            [git] + args, cwd=cwd, capture_output=True,
             text=True, timeout=120, encoding="utf-8",
             env=env, creationflags=_CREATION_FLAGS,
         )
@@ -131,21 +126,42 @@ def clone_repo(repo_url: str, cache_dir: str) -> Tuple[bool, str]:
     log.info("URL: %s", repo_url)
     cache_path = Path(cache_dir)
     if cache_path.exists() and (cache_path / ".git").exists():
-        log.info("仓库已存在")
-        return (True, "仓库已存在")
-    if cache_path.exists():
-        import shutil
-        shutil.rmtree(cache_path, ignore_errors=True)
+        ok, origin = _run_git(["remote", "get-url", "origin"], cache_dir)
+        if not ok:
+            return (False, f"无法读取当前仓库地址: {origin}")
+        if origin.rstrip("/") == repo_url.rstrip("/"):
+            return pull_repo(cache_dir)
+
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    return _run_git(["clone", repo_url, str(cache_path)], str(cache_path.parent))
+    if not cache_path.exists():
+        return _run_git(["clone", repo_url, str(cache_path)], str(cache_path.parent))
+
+    # 先完整克隆新仓库，再替换缓存；保留旧缓存以便找回未推送的提交。
+    staged = Path(tempfile.mkdtemp(prefix=f"{cache_path.name}-new-", dir=cache_path.parent))
+    backup = cache_path.with_name(f"{cache_path.name}.previous-{uuid.uuid4().hex[:8]}")
+    try:
+        ok, message = _run_git(["clone", repo_url, str(staged)], str(cache_path.parent))
+        if not ok:
+            return (False, message)
+        cache_path.rename(backup)
+        try:
+            staged.rename(cache_path)
+        except OSError:
+            backup.rename(cache_path)
+            raise
+        log.info("旧仓库缓存已保留在 %s", backup)
+        return (True, "仓库已切换并更新")
+    except OSError as e:
+        return (False, f"切换仓库失败: {e}")
+    finally:
+        if staged.exists():
+            shutil.rmtree(staged)
 
 
 def pull_repo(cache_dir: str) -> Tuple[bool, str]:
     log.info("=== 拉取更新 ===")
     if not (Path(cache_dir) / ".git").exists():
         return (False, "仓库尚未克隆")
-    _run_git(["reset", "--hard", "HEAD"], cache_dir)
-    _run_git(["clean", "-fd"], cache_dir)
     return _run_git(["pull", "--rebase"], cache_dir)
 
 
@@ -159,9 +175,15 @@ def commit_and_push(cache_dir: str, files: list[str], message: str) -> Tuple[boo
     if not ok:
         return (False, f"git add 失败: {msg}")
 
-    ok, msg = _run_git(["commit", "-m", message], cache_dir)
+    identity_args, identity_error = _commit_identity_args(cache_dir)
+    if identity_error:
+        _run_git(["reset", "--"] + files, cache_dir)
+        return (False, identity_error)
+
+    ok, msg = _run_git(identity_args + ["commit", "-m", message], cache_dir)
     if not ok:
         if "nothing to commit" not in msg.lower() and "nothing added" not in msg.lower():
+            _run_git(["reset", "--"] + files, cache_dir)
             return (False, f"git commit 失败: {msg}")
 
     ok, msg = _run_git(["push"], cache_dir)

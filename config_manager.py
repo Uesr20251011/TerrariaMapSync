@@ -35,6 +35,8 @@ def load_config() -> dict:
         "worlds_path": _get_default_worlds_path(),
         "repo_url": "",
         "repo_cache_dir": str(_get_config_dir() / "repo-cache"),
+        "setup_complete": False,
+        "github_login": "",
     }
 
     if not config_path.exists():

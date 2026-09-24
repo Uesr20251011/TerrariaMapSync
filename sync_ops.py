@@ -2,6 +2,8 @@
 
 import os
 import shutil
+import tempfile
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Tuple
@@ -51,7 +53,7 @@ def upload_map(worlds_path: str, cache_dir: str, map_name: str) -> Tuple[bool, s
     1. 先 pull 最新
     2. 在 cache_dir 中生成 YYYYMMDD原名 副本（.wld + .bak + .bak2）
     3. git add → commit → push
-    4. 删除 cache_dir 中的副本
+    4. 保留仓库中的地图版本
 
     map_name: 不含 .wld 扩展名的地图名，如 "我的世界"
     """
@@ -103,26 +105,14 @@ def upload_map(worlds_path: str, cache_dir: str, map_name: str) -> Tuple[bool, s
             log.error("提交推送失败: %s", msg)
             return (False, msg)
 
-        # 推送成功后 reset 工作区，让新文件在目录中可见
-        log.info("步骤4: 同步工作区...")
-        import subprocess as _sp
-        _sp.run(["git", "reset", "--hard", "HEAD"], cwd=cache_dir,
-                capture_output=True, timeout=10, creationflags=0x08000000)
-
         log.info("========== 上传成功 ==========")
         return (True, f"成功上传 {map_name} ({today})")
 
     finally:
-        # 清理未跟踪的临时文件
-        log.info("清理临时文件...")
-        for f in copied_files:
-            f_path = os.path.join(cache_dir, f)
-            try:
-                if os.path.isfile(f_path):
-                    # 文件已被 git 跟踪则 reset 已恢复它，无需删
-                    log.debug("  跳过: %s (已跟踪)", f)
-            except OSError as e:
-                log.warning("  删除失败: %s - %s", f, e)
+        # 推送失败时保留文件，避免丢失尚未上传的地图版本；下次拉取前
+        # Git 会报告未提交的改动，用户可根据日志处理，不会悄悄覆盖数据。
+        if copied_files:
+            log.debug("本次生成的地图版本: %s", copied_files)
 
 
 def download_map(worlds_path: str, cache_dir: str,
@@ -139,48 +129,73 @@ def download_map(worlds_path: str, cache_dir: str,
     dated_wld: 如 "20260802我的世界.wld"
     original_name: 去掉日期后的文件名，如 "我的世界.wld"
     """
+    if Path(dated_wld).name != dated_wld or Path(original_name).name != original_name:
+        return (False, "地图文件名无效")
+
     # 先拉取最新
     ok, msg = pull_repo(cache_dir)
     if not ok:
         return (False, f"拉取云端更新失败: {msg}")
 
-    # 源文件在 cache_dir 中
-    src_wld = os.path.join(cache_dir, dated_wld)
-    if not os.path.isfile(src_wld):
+    src_wld = Path(cache_dir) / dated_wld
+    if not src_wld.is_file():
         return (False, f"云端文件不存在: {dated_wld}")
 
-    # 目标路径（去日期前缀）
-    dst_wld = os.path.join(worlds_path, original_name)
-    base_name = Path(original_name).stem  # 不含扩展名的原名
-
-    # 确保 Worlds 目录存在
-    os.makedirs(worlds_path, exist_ok=True)
-
-    copied_count = 0
-    errors = []
-
-    # 复制 .wld 文件
-    try:
-        shutil.copy2(src_wld, dst_wld)
-        copied_count += 1
-    except OSError as e:
-        errors.append(f"复制 .wld 失败: {e}")
-
-    # 处理对应的备份文件（.wld.bak 和 .wld.bak2）
-    dated_prefix = Path(dated_wld).stem  # "20260802我的世界"
+    worlds = Path(worlds_path)
+    worlds.mkdir(parents=True, exist_ok=True)
+    dated_prefix = src_wld.stem
+    base_name = Path(original_name).stem
+    files = [(src_wld, worlds / original_name)]
     for ext in ("wld.bak", "wld.bak2"):
-        src_bak = os.path.join(cache_dir, f"{dated_prefix}.{ext}")
-        dst_bak = os.path.join(worlds_path, f"{base_name}.{ext}")
-        if os.path.isfile(src_bak):
+        files.append((Path(cache_dir) / f"{dated_prefix}.{ext}",
+                      worlds / f"{base_name}.{ext}"))
+
+    # 先复制完整版本到临时目录；任何复制失败都不会改动现有存档。
+    temporary = Path(tempfile.mkdtemp(prefix=".terraria-sync-", dir=worlds))
+    staged = temporary / "staged"
+    previous = temporary / "previous"
+    staged.mkdir()
+    previous.mkdir()
+    moved_previous = []
+    installed = []
+    preserve_recovery = False
+    try:
+        for source, destination in files:
+            if source.is_file():
+                shutil.copy2(source, staged / destination.name)
+
+        # 同一版本的地图和备份一起替换；缺失的云端备份会清掉旧备份。
+        for _, destination in files:
+            if destination.exists():
+                os.replace(destination, previous / destination.name)
+                moved_previous.append(destination)
+        for _, destination in files:
+            staged_file = staged / destination.name
+            if staged_file.exists():
+                os.replace(staged_file, destination)
+                installed.append(destination)
+        if moved_previous:
+            backup_root = worlds / ".TerrariaMapSyncBackups"
+            backup_root.mkdir(exist_ok=True)
+            backup_name = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{base_name}-{uuid.uuid4().hex[:6]}"
+            previous.rename(backup_root / backup_name)
+        return (True, f"成功下载 {original_name}；旧地图已自动备份")
+    except OSError as error:
+        recovery_errors = []
+        for destination in installed:
             try:
-                shutil.copy2(src_bak, dst_bak)
-                copied_count += 1
-            except OSError as e:
-                errors.append(f"复制 .{ext} 失败: {e}")
-
-    if errors:
-        if copied_count > 0:
-            return (True, f"部分下载成功 ({copied_count} 个文件)，但: {'; '.join(errors)}")
-        return (False, f"下载失败: {'; '.join(errors)}")
-
-    return (True, f"成功下载 {original_name}")
+                destination.unlink()
+            except OSError as restore_error:
+                recovery_errors.append(str(restore_error))
+        for destination in moved_previous:
+            try:
+                os.replace(previous / destination.name, destination)
+            except OSError as restore_error:
+                recovery_errors.append(str(restore_error))
+        if recovery_errors:
+            preserve_recovery = True
+            return (False, f"下载失败: {error}；恢复失败，旧文件保存在 {previous}")
+        return (False, f"下载失败，原有地图已保留: {error}")
+    finally:
+        if not preserve_recovery:
+            shutil.rmtree(temporary)
